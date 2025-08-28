@@ -1,37 +1,43 @@
 ```mermaid
 flowchart LR
-  subgraph GitHub
-    APP["App Repo
-    (Code)"]
-    INFRA["Manifests/Helm Repo
-    (Desired State)"]
+  %% GitOps flow for webapp-color on EKS using Helm + ArgoCD, domain eks.gitops.club
+
+  subgraph Repos[Source Repos]
+    AppRepo[(App Repo<br/>code + Dockerfile)]
+    EnvRepo[(Env Repo<br/>Helm values: kcd_colombia_env)]
+    PlatformRepo[(Platform Repo<br/>ArgoCD apps: kcd_colombia_platform)]
   end
 
-  subgraph Kubernetes["Amazon EKS Cluster"]
-    ARGO["ArgoCD
-    (Controller)"]
-    DEPLOY["Deployment
-    (webapp-color)"]
-    SVC["Service
-    (ClusterIP)"]
-    INGRESS["Ingress / ALB Ingress Controller"]
-    ESO["External Secrets Operator
-    (optional)"]
-    K8SSECRETS["Kubernetes Secrets"]
+  AppRepo -->|git tag push| CI[GitHub Actions<br/>CI/CD]
+  CI -->|Build & push image| ECR[(Amazon ECR)]
+  CI -->|"Update image tag (values file)"| EnvRepo
+  EnvRepo -->|git commit| ArgoCD
+  PlatformRepo -->|App/Project manifests| ArgoCD
+
+  subgraph Cluster[Amazon EKS prod]
+    ArgoCD[[ArgoCD Controller]]
+    Helm["Helm Release<br/>(webapp-color)"]
+    Ingress[Ingress]
+    Service[Service]
+    Pods[(Pods)]
   end
 
-  AWS["AWS Secrets Manager / SSM"]
+  ArgoCD -->|Sync Helm chart + values| Helm
+  Helm -.-> Ingress
+  Helm -.-> Service
+  Ingress --> Service
+  Service --> Pods
 
-  USERS[Users] -->|"HTTP/S"| INGRESS
-  INGRESS --> SVC
-  SVC --> DEPLOY
+  Ingress --> ALB[(AWS ALB)]
+  DNS[(Route53 DNS<br/>eks.gitops.club)] --> ALB
+  Users([Users]) -->|HTTPS| DNS
+  ALB --> Ingress
 
-  APP --> INFRA
-  INFRA -->|"Git push / PR merge"| INFRA
-  ARGO -->|"Sync manifests"| DEPLOY
-  ARGO -->|"Watch repo
-  (poll/webhook)"| INFRA
+  %% Images pulled by pods
+  ECR --> Pods
 
-  AWS -.->|"Sync secrets"| ESO -.-> K8SSECRETS
-  K8SSECRETS -.-> DEPLOY
+  %% Legend (implicit):
+  %% AppRepo: kcd_colombia_webapp_color
+  %% EnvRepo: kcd_colombia_env (values update holds image tag)
+  %% PlatformRepo: kcd_colombia_platform (ArgoCD app / project defs)
 ```
